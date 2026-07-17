@@ -57,7 +57,7 @@ localmente.
 - Formatação nunca é discutida em review: `spotless:apply` é a resposta canônica.
 - CPD já pagou o próprio ingresso: na calibração encontrou o cálculo de séries
   mensais/pico duplicado entre Padrões e YouTube, extraído para
-  `DatabaseService.monthlyPhases`.
+  `EventQueries.monthlyPhases`.
 
 ## Alternativas consideradas
 

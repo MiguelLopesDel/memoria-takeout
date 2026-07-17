@@ -1,8 +1,10 @@
 package app.memoria;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,13 +23,16 @@ class TakeoutImporterIntegrationTest {
     Path tempDir;
 
     private JdbcTemplate jdbc;
+    private AnalyticsService analytics;
+    private AnnotationsService annotations;
+    private YouTubeService youtube;
 
     @Test
     void importsRepresentativeTakeoutWithoutHtmlFragments() throws Exception {
         Path takeout = tempDir.resolve("Takeout");
         writeRepresentativeTakeout(takeout);
 
-        DatabaseService database = database();
+        EventStore database = database();
         TakeoutImporter importer =
                 new TakeoutImporter(database, new ObjectMapper(), takeout.toString(), tempDir.toString());
         ImportResult result = importer.importTakeout(takeout.toString());
@@ -36,25 +41,88 @@ class TakeoutImporterIntegrationTest {
         assertThat(database.eventCount()).isEqualTo(7);
         assertThat(((Number) database.latestImport().get("event_count")).longValue())
                 .isEqualTo(7);
-        assertThat(database.quality(FilterParams.of("", "", "", "", "", "")))
+        assertThat(analytics.quality(FilterParams.of("", "", "", "", "", "")))
                 .allSatisfy(row -> assertThat(((Number) row.get("withoutTimestamp")).longValue())
                         .isZero());
 
-        List<Map<String, Object>> search = database.events(FilterParams.of("", "Search", "", "", "", ""), 20, 0);
+        List<Map<String, Object>> search = analytics.events(FilterParams.of("", "Search", "", "", "", ""), 20, 0);
         assertThat(search).hasSize(1);
         assertThat(search.getFirst().get("timestamp")).isEqualTo("2025-03-19T02:46:47Z");
+        assertThat(search.getFirst())
+                .containsEntry("year_month", "2025-03")
+                .containsEntry("local_day", "2025-03-18")
+                .containsEntry("local_hour", 23)
+                .containsEntry("local_weekday", 2);
         assertThat(search.getFirst().get("title").toString()).contains("google baixar informações");
 
-        List<Map<String, Object>> youtube = database.events(FilterParams.of("", "YouTube", "", "", "", ""), 20, 0);
+        List<Map<String, Object>> youtube = analytics.events(FilterParams.of("", "YouTube", "", "", "", ""), 20, 0);
         assertThat(youtube).extracting(row -> row.get("type")).contains("video", "comment", "chat");
         assertThat(youtube).extracting(row -> row.get("domain")).contains("youtube.com");
+        assertThat(this.youtube.youtubeReport(FilterParams.of("", "", "", "", "", ""), 20))
+                .containsKeys("summary", "topVideos", "topChannels");
 
-        List<Map<String, Object>> gmail = database.events(FilterParams.of("", "Gmail", "email", "", "", ""), 20, 0);
+        List<Map<String, Object>> gmail = analytics.events(FilterParams.of("", "Gmail", "email", "", "", ""), 20, 0);
         assertThat(gmail).hasSize(1);
         assertThat(gmail.getFirst().get("title")).isEqualTo("Assunto de teste");
 
-        assertThat(database.events(FilterParams.of("missing:time", "", "", "", "", ""), 20, 0))
+        assertThat(analytics.events(FilterParams.of("missing:time", "", "", "", "", ""), 20, 0))
                 .isEmpty();
+    }
+
+    @Test
+    void failedImportStillRestoresTheSearchIndex() throws Exception {
+        EventStore store = database();
+        EventRecord event = new EventRecord(
+                "event:failed-import",
+                "2025-03-19T02:46:47Z",
+                "Test",
+                "activity",
+                "needlefailure",
+                null,
+                null,
+                null,
+                null,
+                "broken.json",
+                "{}");
+
+        assertThatThrownBy(() -> store.mergeImport("broken", batches -> {
+                    batches.accept(List.of(event));
+                    throw new IOException("broken input");
+                }))
+                .isInstanceOf(IOException.class)
+                .hasMessage("broken input");
+
+        assertThat(analytics.events(FilterParams.of("needlefailure", "", "", "", "", ""), 20, 0))
+                .singleElement()
+                .satisfies(row -> assertThat(row.get("title")).isEqualTo("needlefailure"));
+    }
+
+    @Test
+    void timestampBackfillRecomputesAllLocalColumns() throws Exception {
+        EventStore store = database();
+        EventRecord event = new EventRecord(
+                "event:undated",
+                null,
+                "Test",
+                "activity",
+                "Recovered at 2025-03-19T02:46:47Z",
+                null,
+                null,
+                null,
+                null,
+                "undated.json",
+                "{}");
+        store.mergeImport("undated", batches -> batches.accept(List.of(event)));
+
+        assertThat(store.backfillTimestamps(10)).containsEntry("updated", 1);
+        assertThat(analytics.events(FilterParams.of("", "Test", "", "", "", ""), 20, 0))
+                .singleElement()
+                .satisfies(row -> assertThat(row)
+                        .containsEntry("timestamp", "2025-03-19T02:46:47Z")
+                        .containsEntry("year_month", "2025-03")
+                        .containsEntry("local_day", "2025-03-18")
+                        .containsEntry("local_hour", 23)
+                        .containsEntry("local_weekday", 2));
     }
 
     @Test
@@ -62,23 +130,23 @@ class TakeoutImporterIntegrationTest {
         Path takeout = tempDir.resolve("Takeout");
         writeRepresentativeTakeout(takeout);
 
-        DatabaseService database = database();
+        EventStore database = database();
         TakeoutImporter importer =
                 new TakeoutImporter(database, new ObjectMapper(), takeout.toString(), tempDir.toString());
         importer.importTakeout(takeout.toString());
 
-        assertThat(database.events(FilterParams.of("has:time", "YouTube,Chrome", "", "", "", ""), 20, 0))
+        assertThat(analytics.events(FilterParams.of("has:time", "YouTube,Chrome", "", "", "", ""), 20, 0))
                 .hasSize(4);
-        assertThat(database.events(FilterParams.of("", "-YouTube", "", "", "", ""), 20, 0))
+        assertThat(analytics.events(FilterParams.of("", "-YouTube", "", "", "", ""), 20, 0))
                 .noneSatisfy(row -> assertThat(row.get("source")).isEqualTo("YouTube"));
-        assertThat(database.events(FilterParams.of("site:youtube.com", "", "", "", "", ""), 20, 0))
+        assertThat(analytics.events(FilterParams.of("site:youtube.com", "", "", "", "", ""), 20, 0))
                 .allSatisfy(row -> assertThat(row.get("domain")).isEqualTo("youtube.com"));
-        assertThat(database.events(FilterParams.of("title:google", "Search", "", "", "", ""), 20, 0))
+        assertThat(analytics.events(FilterParams.of("title:google", "Search", "", "", "", ""), 20, 0))
                 .hasSize(1);
-        assertThat(database.events(FilterParams.of("-YouTube", "", "", "", "", ""), 20, 0))
+        assertThat(analytics.events(FilterParams.of("-YouTube", "", "", "", "", ""), 20, 0))
                 .noneSatisfy(
                         row -> assertThat(String.valueOf(row.get("source"))).isEqualTo("YouTube"));
-        assertThat(database.events(FilterParams.of("abc-123", "", "", "", "", ""), 20, 0))
+        assertThat(analytics.events(FilterParams.of("abc-123", "", "", "", "", ""), 20, 0))
                 .isNotNull();
     }
 
@@ -87,7 +155,7 @@ class TakeoutImporterIntegrationTest {
         Path takeout = tempDir.resolve("Takeout");
         writeRepresentativeTakeout(takeout);
 
-        DatabaseService database = database();
+        EventStore database = database();
         TakeoutImporter importer =
                 new TakeoutImporter(database, new ObjectMapper(), takeout.toString(), tempDir.toString());
 
@@ -96,12 +164,14 @@ class TakeoutImporterIntegrationTest {
         assertThat(first.total()).isEqualTo(7);
 
         // Tag one event, keyed by its (stable) id.
-        long eventId = ((Number) database.events(FilterParams.of("", "Search", "", "", "", ""), 20, 0)
+        long eventId = ((Number) analytics
+                        .events(FilterParams.of("", "Search", "", "", "", ""), 20, 0)
                         .getFirst()
                         .get("id"))
                 .longValue();
-        long tagId = ((Number) database.createTag(Map.of("name", "importante")).get("id")).longValue();
-        database.tagEvent(eventId, tagId);
+        long tagId =
+                ((Number) annotations.createTag(Map.of("name", "importante")).get("id")).longValue();
+        annotations.tagEvent(eventId, tagId);
 
         // Simulate a database produced by the previous parser identity strategy.
         jdbc.update("UPDATE events SET event_key = 'legacy:key', source = 'Legacy source' WHERE id = ?", eventId);
@@ -139,7 +209,7 @@ class TakeoutImporterIntegrationTest {
         ]
         """);
 
-        DatabaseService database = database();
+        EventStore database = database();
         TakeoutImporter importer =
                 new TakeoutImporter(database, new ObjectMapper(), takeout.toString(), tempDir.toString());
 
@@ -165,7 +235,7 @@ class TakeoutImporterIntegrationTest {
         write(takeout.resolve("Minha atividade/YouTube/Minhaatividade.json"), myActivityRecord);
         write(takeout.resolve("YouTube e YouTube Music/histórico/histórico-de-visualização.json"), historyRecord);
 
-        DatabaseService database = database();
+        EventStore database = database();
         TakeoutImporter importer =
                 new TakeoutImporter(database, new ObjectMapper(), takeout.toString(), tempDir.toString());
 
@@ -191,10 +261,11 @@ class TakeoutImporterIntegrationTest {
         """,
                 canonicalId);
         long duplicateId = jdbc.queryForObject("SELECT MAX(id) FROM events", Long.class);
-        long tagId = ((Number)
-                        database.createTag(Map.of("name", "duplicado anotado")).get("id"))
+        long tagId = ((Number) annotations
+                        .createTag(Map.of("name", "duplicado anotado"))
+                        .get("id"))
                 .longValue();
-        database.tagEvent(duplicateId, tagId);
+        annotations.tagEvent(duplicateId, tagId);
 
         database = database();
         assertThat(database.eventCount()).isEqualTo(1);
@@ -235,19 +306,19 @@ class TakeoutImporterIntegrationTest {
         post-1,Ativar comentários,Permitir todos os comentários
         """);
 
-        DatabaseService database = database();
+        EventStore database = database();
         TakeoutImporter importer =
                 new TakeoutImporter(database, new ObjectMapper(), takeout.toString(), tempDir.toString());
         ImportResult result = importer.importTakeout(takeout.toString());
 
         assertThat(result.eventCount()).isEqualTo(2);
-        List<Map<String, Object>> chrome = database.events(FilterParams.of("", "Chrome", "", "", "", ""), 20, 0);
+        List<Map<String, Object>> chrome = analytics.events(FilterParams.of("", "Chrome", "", "", "", ""), 20, 0);
         assertThat(chrome).hasSize(1);
         assertThat(chrome.getFirst().get("domain")).isEqualTo("example.com");
         assertThat(chrome.getFirst().get("url")).isEqualTo("https://example.com/page");
         assertThat(chrome.getFirst().get("text").toString()).contains("searchable response", "attachment.png");
 
-        List<Map<String, Object>> posts = database.events(FilterParams.of("", "YouTube", "post", "", "", ""), 20, 0);
+        List<Map<String, Object>> posts = analytics.events(FilterParams.of("", "YouTube", "post", "", "", ""), 20, 0);
         assertThat(posts).hasSize(1);
         assertThat(posts.getFirst().get("timestamp")).isEqualTo("2026-05-28T19:55:42Z");
         assertThat(posts.getFirst().get("title")).isEqualTo("Texto real da postagem");
@@ -332,44 +403,48 @@ class TakeoutImporterIntegrationTest {
         Corpo.
         """);
 
-        DatabaseService database = database();
+        EventStore database = database();
         TakeoutImporter importer =
                 new TakeoutImporter(database, new ObjectMapper(), takeout.toString(), tempDir.toString());
         ImportResult result = importer.importTakeout(takeout.toString());
 
         assertThat(result.eventCount()).isEqualTo(11);
-        assertThat(database.events(
+        assertThat(analytics.events(
                         FilterParams.of(
                                 "", "", "calendar,meeting,purchase,install,task,notebook,message,upload", "", "", ""),
                         20,
                         0))
                 .hasSize(8);
-        assertThat(database.events(FilterParams.of("", "Registro de acesso", "access", "", "", ""), 20, 0))
+        assertThat(analytics.events(FilterParams.of("", "Registro de acesso", "access", "", "", ""), 20, 0))
                 .hasSize(1);
-        assertThat(database.events(FilterParams.of("", "Blogger", "comment", "", "", ""), 20, 0))
+        assertThat(analytics.events(FilterParams.of("", "Blogger", "comment", "", "", ""), 20, 0))
                 .hasSize(1);
-        assertThat(database.events(FilterParams.of("", "Gmail", "email", "", "", ""), 20, 0))
+        assertThat(analytics.events(FilterParams.of("", "Gmail", "email", "", "", ""), 20, 0))
                 .singleElement()
                 .satisfies(row -> {
                     assertThat(row.get("timestamp")).isEqualTo("2026-07-08T23:53:00Z");
                     assertThat(row.get("title")).isEqualTo("Assunto sem data");
                 });
-        assertThat(database.events(FilterParams.of("missing:time", "", "", "", "", ""), 20, 0))
+        assertThat(analytics.events(FilterParams.of("missing:time", "", "", "", "", ""), 20, 0))
                 .isEmpty();
     }
 
-    private DatabaseService database() throws Exception {
+    // Wires the real modules against one SQLite file, mirroring the Spring wiring:
+    // EventStore owns schema and mutations; the read-side services share EventQueries.
+    private EventStore database() throws Exception {
         Path db = tempDir.resolve("db");
         Files.createDirectories(db);
         DriverManagerDataSource dataSource = new DriverManagerDataSource("jdbc:sqlite:" + db.resolve("memoria.db"));
         this.jdbc = new JdbcTemplate(dataSource);
-        DatabaseService database = new DatabaseService(
-                db.toString(),
-                jdbc,
-                new NamedParameterJdbcTemplate(jdbc),
-                new TransactionTemplate(new DataSourceTransactionManager(dataSource)));
-        database.init();
-        return database;
+        NamedParameterJdbcTemplate named = new NamedParameterJdbcTemplate(jdbc);
+        EventStore store = new EventStore(
+                db.toString(), jdbc, new TransactionTemplate(new DataSourceTransactionManager(dataSource)));
+        store.init();
+        EventQueries queries = new EventQueries(named);
+        this.analytics = new AnalyticsService(jdbc, named, queries);
+        this.youtube = new YouTubeService(named, queries);
+        this.annotations = new AnnotationsService(jdbc, named);
+        return store;
     }
 
     private void writeRepresentativeTakeout(Path takeout) throws Exception {

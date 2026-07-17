@@ -23,19 +23,28 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class ApiController {
-    private final DatabaseService database;
+    private final EventStore store;
+    private final AnalyticsService analytics;
+    private final YouTubeService youtube;
+    private final AnnotationsService annotations;
     private final ImportJobService importJobs;
     private final FileBrowserService fileBrowser;
     private final String defaultTakeoutPath;
     private final ObjectMapper mapper;
 
     public ApiController(
-            DatabaseService database,
+            EventStore store,
+            AnalyticsService analytics,
+            YouTubeService youtube,
+            AnnotationsService annotations,
             ImportJobService importJobs,
             FileBrowserService fileBrowser,
             @Value("${memoria.default-takeout-path}") String defaultTakeoutPath,
             ObjectMapper mapper) {
-        this.database = database;
+        this.store = store;
+        this.analytics = analytics;
+        this.youtube = youtube;
+        this.annotations = annotations;
         this.importJobs = importJobs;
         this.fileBrowser = fileBrowser;
         this.defaultTakeoutPath = defaultTakeoutPath;
@@ -44,8 +53,7 @@ public class ApiController {
 
     @GetMapping("/api/status")
     public StatusResponse status() {
-        return new StatusResponse(
-                database.dbPath(), database.eventCount(), database.latestImport(), defaultTakeoutPath);
+        return new StatusResponse(store.dbPath(), store.eventCount(), store.latestImport(), defaultTakeoutPath);
     }
 
     @GetMapping("/api/files/browse")
@@ -81,8 +89,8 @@ public class ApiController {
             return ResponseEntity.badRequest()
                     .body(new ErrorResponse("Aguarde a importação em andamento terminar antes de limpar a base."));
         }
-        database.clearAll();
-        return ResponseEntity.ok(Map.of("cleared", true, "eventCount", database.eventCount()));
+        store.clearAll();
+        return ResponseEntity.ok(Map.of("cleared", true, "eventCount", store.eventCount()));
     }
 
     @GetMapping("/api/facets")
@@ -94,7 +102,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String from,
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product) {
-        return database.facets(FilterParams.of(q, source, type, domain, from, to, product));
+        return analytics.facets(FilterParams.of(q, source, type, domain, from, to, product));
     }
 
     @GetMapping("/api/metrics")
@@ -106,7 +114,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String from,
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product) {
-        return database.metrics(FilterParams.of(q, source, type, domain, from, to, product));
+        return analytics.metrics(FilterParams.of(q, source, type, domain, from, to, product));
     }
 
     @GetMapping("/api/metrics/overview")
@@ -118,7 +126,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String from,
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product) {
-        return database.overview(FilterParams.of(q, source, type, domain, from, to, product));
+        return analytics.overview(FilterParams.of(q, source, type, domain, from, to, product));
     }
 
     @GetMapping("/api/site")
@@ -132,7 +140,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String product,
             @RequestParam(defaultValue = "40") int limit,
             @RequestParam(defaultValue = "true") boolean whole) {
-        return database.siteReport(
+        return analytics.siteReport(
                 FilterParams.of(q, source, type, domain, from, to, product), Math.max(1, Math.min(200, limit)), whole);
     }
 
@@ -146,7 +154,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product,
             @RequestParam(defaultValue = "30") int limit) {
-        return database.patterns(
+        return analytics.patterns(
                 FilterParams.of(q, source, type, domain, from, to, product), Math.max(1, Math.min(200, limit)));
     }
 
@@ -160,7 +168,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product,
             @RequestParam(defaultValue = "30") int limit) {
-        return database.youtubeReport(
+        return youtube.youtubeReport(
                 FilterParams.of(q, source, type, domain, from, to, product), Math.max(1, Math.min(200, limit)));
     }
 
@@ -175,13 +183,13 @@ public class ApiController {
             @RequestParam(defaultValue = "") String product,
             @RequestParam(defaultValue = "") String search,
             @RequestParam(defaultValue = "40") int limit) {
-        return database.youtubeVideos(FilterParams.of(q, source, type, domain, from, to, product), search, limit);
+        return youtube.youtubeVideos(FilterParams.of(q, source, type, domain, from, to, product), search, limit);
     }
 
     @GetMapping("/api/youtube/video")
     public ResponseEntity<?> youtubeVideo(@RequestParam String id) {
         try {
-            return ResponseEntity.ok(database.youtubeVideo(id));
+            return ResponseEntity.ok(youtube.youtubeVideo(id));
         } catch (IllegalArgumentException error) {
             return ResponseEntity.badRequest().body(new ErrorResponse(error.getMessage()));
         }
@@ -198,27 +206,27 @@ public class ApiController {
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product,
             @RequestParam(defaultValue = "15") int limit) {
-        return database.youtubeChannel(FilterParams.of(q, source, type, domain, from, to, product), name, limit);
+        return youtube.youtubeChannel(FilterParams.of(q, source, type, domain, from, to, product), name, limit);
     }
 
     @GetMapping("/api/topics")
     public List<Map<String, Object>> topics() {
-        return database.topics();
+        return annotations.topics();
     }
 
     @PostMapping("/api/topics")
     public Map<String, Object> createTopic(@RequestBody Map<String, Object> payload) {
-        return database.createTopic(payload);
+        return annotations.createTopic(payload);
     }
 
     @PostMapping("/api/topics/update")
     public Map<String, Object> updateTopic(@RequestBody Map<String, Object> payload) {
-        return database.updateTopic(number(payload, "id"), payload);
+        return annotations.updateTopic(number(payload, "id"), payload);
     }
 
     @PostMapping("/api/topics/delete")
     public void deleteTopic(@RequestBody Map<String, Object> payload) {
-        database.deleteTopic(number(payload, "id"));
+        annotations.deleteTopic(number(payload, "id"));
     }
 
     @GetMapping("/api/topics/report")
@@ -233,8 +241,8 @@ public class ApiController {
             @RequestParam(defaultValue = "") String product,
             @RequestParam(defaultValue = "20") int limit) {
         try {
-            return ResponseEntity.ok(
-                    database.topicReport(keywords, FilterParams.of(q, source, type, domain, from, to, product), limit));
+            return ResponseEntity.ok(analytics.topicReport(
+                    keywords, FilterParams.of(q, source, type, domain, from, to, product), limit));
         } catch (IllegalArgumentException error) {
             return ResponseEntity.badRequest().body(new ErrorResponse(error.getMessage()));
         }
@@ -244,7 +252,7 @@ public class ApiController {
     public ResponseEntity<?> onThisDay(
             @RequestParam(defaultValue = "") String date, @RequestParam(defaultValue = "8") int perYear) {
         try {
-            return ResponseEntity.ok(database.onThisDay(date, perYear));
+            return ResponseEntity.ok(analytics.onThisDay(date, perYear));
         } catch (IllegalArgumentException error) {
             return ResponseEntity.badRequest().body(new ErrorResponse(error.getMessage()));
         }
@@ -253,7 +261,7 @@ public class ApiController {
     @GetMapping("/api/day")
     public ResponseEntity<?> day(@RequestParam String date) {
         try {
-            return ResponseEntity.ok(database.day(date));
+            return ResponseEntity.ok(analytics.day(date));
         } catch (IllegalArgumentException error) {
             return ResponseEntity.badRequest().body(new ErrorResponse(error.getMessage()));
         }
@@ -270,7 +278,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String product,
             @RequestParam(defaultValue = "80") int limit,
             @RequestParam(defaultValue = "0") int offset) {
-        return database.search(
+        return analytics.search(
                 FilterParams.of(q, source, type, domain, from, to, product),
                 Math.max(1, Math.min(200, limit)),
                 Math.max(0, offset));
@@ -290,12 +298,12 @@ public class ApiController {
         int safeLimit = Math.max(1, Math.min(200, limit));
         int safeOffset = Math.max(0, offset);
         return new EventsResponse(
-                database.events(FilterParams.of(q, source, type, domain, from, to, product), safeLimit, safeOffset));
+                analytics.events(FilterParams.of(q, source, type, domain, from, to, product), safeLimit, safeOffset));
     }
 
     @GetMapping("/api/products")
     public List<Facet> products() {
-        return database.products();
+        return analytics.products();
     }
 
     @GetMapping("/api/timeline/days")
@@ -307,7 +315,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String from,
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product) {
-        return database.days(FilterParams.of(q, source, type, domain, from, to, product));
+        return analytics.days(FilterParams.of(q, source, type, domain, from, to, product));
     }
 
     @GetMapping("/api/calendar/activity")
@@ -319,7 +327,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String from,
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product) {
-        return database.calendar(FilterParams.of(q, source, type, domain, from, to, product));
+        return analytics.calendar(FilterParams.of(q, source, type, domain, from, to, product));
     }
 
     @GetMapping("/api/metrics/calendar")
@@ -331,7 +339,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String from,
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product) {
-        return database.calendarDense(FilterParams.of(q, source, type, domain, from, to, product));
+        return analytics.calendarDense(FilterParams.of(q, source, type, domain, from, to, product));
     }
 
     @GetMapping("/api/domains")
@@ -339,7 +347,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String search,
             @RequestParam(defaultValue = "200") int limit,
             @RequestParam(defaultValue = "root") String group) {
-        return database.domainSearch(search, limit, !"host".equalsIgnoreCase(group));
+        return analytics.domainSearch(search, limit, !"host".equalsIgnoreCase(group));
     }
 
     @GetMapping("/api/rankings/domains")
@@ -352,7 +360,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product,
             @RequestParam(defaultValue = "50") int limit) {
-        return database.domainRanking(FilterParams.of(q, source, type, domain, from, to, product), limit);
+        return analytics.domainRanking(FilterParams.of(q, source, type, domain, from, to, product), limit);
     }
 
     @GetMapping("/api/rankings/sources")
@@ -365,7 +373,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product,
             @RequestParam(defaultValue = "50") int limit) {
-        return database.sourceRanking(FilterParams.of(q, source, type, domain, from, to, product), limit);
+        return analytics.sourceRanking(FilterParams.of(q, source, type, domain, from, to, product), limit);
     }
 
     @GetMapping("/api/rankings/types")
@@ -378,7 +386,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product,
             @RequestParam(defaultValue = "50") int limit) {
-        return database.typeRanking(FilterParams.of(q, source, type, domain, from, to, product), limit);
+        return analytics.typeRanking(FilterParams.of(q, source, type, domain, from, to, product), limit);
     }
 
     @GetMapping("/api/quality")
@@ -390,34 +398,34 @@ public class ApiController {
             @RequestParam(defaultValue = "") String from,
             @RequestParam(defaultValue = "") String to,
             @RequestParam(defaultValue = "") String product) {
-        return database.quality(FilterParams.of(q, source, type, domain, from, to, product));
+        return analytics.quality(FilterParams.of(q, source, type, domain, from, to, product));
     }
 
     @PostMapping("/api/backfill/timestamps")
     public Map<String, Object> backfillTimestamps(@RequestBody(required = false) Map<String, Object> payload) {
         int limit =
                 payload == null || !payload.containsKey("limit") ? 50_000 : ((Number) payload.get("limit")).intValue();
-        return database.backfillTimestamps(limit);
+        return store.backfillTimestamps(limit);
     }
 
     @PostMapping("/api/backfill/channels")
     public Map<String, Object> backfillChannels() {
-        return database.backfillYouTubeChannels();
+        return store.backfillYouTubeChannels();
     }
 
     @PostMapping("/api/cleanup/format-duplicates")
     public Map<String, Object> cleanupFormatDuplicates() {
-        return database.cleanupFormatDuplicates();
+        return store.cleanupFormatDuplicates();
     }
 
     @PostMapping("/api/cleanup/metadata-fragments")
     public Map<String, Object> cleanupMetadataFragments() {
-        return database.cleanupMetadataFragments();
+        return store.cleanupMetadataFragments();
     }
 
     @PostMapping("/api/cleanup/undated-html-fragments")
     public Map<String, Object> cleanupUndatedHtmlFragments() {
-        return database.cleanupUndatedHtmlFragments();
+        return store.cleanupUndatedHtmlFragments();
     }
 
     @GetMapping("/api/compare")
@@ -426,90 +434,90 @@ public class ApiController {
             @RequestParam String leftTo,
             @RequestParam String rightFrom,
             @RequestParam String rightTo) {
-        return database.compare(
+        return analytics.compare(
                 FilterParams.of("", "", "", "", leftFrom, leftTo), FilterParams.of("", "", "", "", rightFrom, rightTo));
     }
 
     @GetMapping("/api/saved-filters")
     public List<Map<String, Object>> savedFilters() {
-        return database.savedFilters();
+        return annotations.savedFilters();
     }
 
     @PostMapping("/api/saved-filters")
     public Map<String, Object> saveFilter(@RequestBody Map<String, Object> payload) {
-        return database.saveFilter(payload);
+        return annotations.saveFilter(payload);
     }
 
     @PostMapping("/api/saved-filters/delete")
     public void deleteSavedFilter(@RequestBody Map<String, Object> payload) {
-        database.deleteSavedFilter(number(payload, "id"));
+        annotations.deleteSavedFilter(number(payload, "id"));
     }
 
     @GetMapping("/api/tags")
     public List<Map<String, Object>> tags() {
-        return database.tags();
+        return annotations.tags();
     }
 
     @PostMapping("/api/tags")
     public Map<String, Object> createTag(@RequestBody Map<String, Object> payload) {
-        return database.createTag(payload);
+        return annotations.createTag(payload);
     }
 
     @PostMapping("/api/tags/apply")
     public void tagEvent(@RequestBody Map<String, Object> payload) {
-        database.tagEvent(number(payload, "eventId"), number(payload, "tagId"));
+        annotations.tagEvent(number(payload, "eventId"), number(payload, "tagId"));
     }
 
     @PostMapping("/api/tags/remove")
     public void untagEvent(@RequestBody Map<String, Object> payload) {
-        database.untagEvent(number(payload, "eventId"), number(payload, "tagId"));
+        annotations.untagEvent(number(payload, "eventId"), number(payload, "tagId"));
     }
 
     @GetMapping("/api/events/tags")
     public List<Map<String, Object>> tagsForEvent(@RequestParam long eventId) {
-        return database.tagsForEvent(eventId);
+        return annotations.tagsForEvent(eventId);
     }
 
     @GetMapping("/api/events/by-tag")
     public List<Map<String, Object>> eventsByTag(
             @RequestParam long tagId, @RequestParam(defaultValue = "300") int limit) {
-        return database.eventsByTag(tagId, limit);
+        return annotations.eventsByTag(tagId, limit);
     }
 
     @GetMapping("/api/collections")
     public List<Map<String, Object>> collections() {
-        return database.collections();
+        return annotations.collections();
     }
 
     @PostMapping("/api/collections")
     public Map<String, Object> createCollection(@RequestBody Map<String, Object> payload) {
-        return database.createCollection(payload);
+        return annotations.createCollection(payload);
     }
 
     @PostMapping("/api/collections/add")
     public void addToCollection(@RequestBody Map<String, Object> payload) {
-        database.addToCollection(number(payload, "collectionId"), number(payload, "eventId"));
+        annotations.addToCollection(number(payload, "collectionId"), number(payload, "eventId"));
     }
 
     @PostMapping("/api/collections/remove")
     public void removeFromCollection(@RequestBody Map<String, Object> payload) {
-        database.removeFromCollection(number(payload, "collectionId"), number(payload, "eventId"));
+        annotations.removeFromCollection(number(payload, "collectionId"), number(payload, "eventId"));
     }
 
     @GetMapping("/api/collections/events")
     public List<Map<String, Object>> collectionEvents(
             @RequestParam long collectionId, @RequestParam(defaultValue = "300") int limit) {
-        return database.collectionEvents(collectionId, limit);
+        return annotations.collectionEvents(collectionId, limit);
     }
 
     @GetMapping("/api/notes")
     public Map<String, Object> note(@RequestParam long eventId) {
-        return database.note(eventId);
+        return annotations.note(eventId);
     }
 
     @PostMapping("/api/notes")
     public Map<String, Object> saveNote(@RequestBody Map<String, Object> payload) {
-        return database.saveNote(number(payload, "eventId"), payload);
+        return annotations.saveNote(number(payload, "eventId"), payload);
     }
 
     @GetMapping("/api/export")
@@ -524,7 +532,7 @@ public class ApiController {
             @RequestParam(defaultValue = "") String product)
             throws Exception {
         FilterParams filters = FilterParams.of(q, source, type, domain, from, to, product);
-        List<Map<String, Object>> rows = database.events(filters, 10_000, 0);
+        List<Map<String, Object>> rows = analytics.events(filters, 10_000, 0);
         if ("csv".equalsIgnoreCase(format)) return file("memoria.csv", "text/csv", csv(rows));
         if ("pdf".equalsIgnoreCase(format)) return file("memoria.pdf", "application/pdf", pdf(filters, rows));
         return file(

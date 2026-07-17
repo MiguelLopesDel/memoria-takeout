@@ -12,11 +12,11 @@ import org.springframework.stereotype.Service;
 @Service
 public class ImportJobService {
     private final TakeoutImporter importer;
-    private final DatabaseService database;
+    private final EventStore database;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicReference<ImportJob> current = new AtomicReference<>(idle());
 
-    public ImportJobService(TakeoutImporter importer, DatabaseService database) {
+    public ImportJobService(TakeoutImporter importer, EventStore database) {
         this.importer = importer;
         this.database = database;
     }

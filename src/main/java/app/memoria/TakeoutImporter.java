@@ -65,10 +65,7 @@ public class TakeoutImporter {
             "(\\d{1,2}) de ([a-zç.]+) de (\\d{4}), (\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*(BRT|BRST|UTC|GMT)?",
             java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.UNICODE_CASE);
 
-    private static final DateTimeFormatter LOCAL_DAY = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-    private static final DateTimeFormatter LOCAL_MONTH = DateTimeFormatter.ofPattern("yyyy-MM");
-
-    private final DatabaseService database;
+    private final EventStore database;
     private final ObjectMapper mapper;
     private final String defaultTakeoutPath;
     private final List<Path> importRoots;
@@ -80,7 +77,7 @@ public class TakeoutImporter {
 
     @org.springframework.beans.factory.annotation.Autowired
     public TakeoutImporter(
-            DatabaseService database,
+            EventStore database,
             ObjectMapper mapper,
             @Value("${memoria.default-takeout-path}") String defaultTakeoutPath,
             @Value("${memoria.import-roots}") String importRoots,
@@ -93,8 +90,7 @@ public class TakeoutImporter {
     }
 
     // Convenience constructor for tests and non-Spring callers; uses the default timezone.
-    public TakeoutImporter(
-            DatabaseService database, ObjectMapper mapper, String defaultTakeoutPath, String importRoots) {
+    public TakeoutImporter(EventStore database, ObjectMapper mapper, String defaultTakeoutPath, String importRoots) {
         this(database, mapper, defaultTakeoutPath, importRoots, "America/Sao_Paulo");
     }
 
@@ -122,58 +118,61 @@ public class TakeoutImporter {
         }
 
         progress.update(new ImportProgress("Procurando arquivos do Takeout", -1, -1, -1, null, null, -1));
-        List<Path> files = relevantFiles(importRoot);
+        Path takeoutRoot = importRoot;
+        List<Path> files = relevantFiles(takeoutRoot);
         progress.update(new ImportProgress("Arquivos encontrados", -1, files.size(), 0, null, null, -1));
 
         progress.update(new ImportProgress("Preparando importação incremental", 0, files.size(), 0, null, null, 0));
         occurrenceCounter.clear();
-        long beforeCount = database.eventCount();
-        long importId = database.beginImport(source.toString());
         long[] count = {0};
         long[] bytesRead = {0};
-        int processed = 0;
-        List<EventRecord> batch = new ArrayList<>(INSERT_BATCH_SIZE);
-
-        for (Path file : files) {
-            // Identical records in one file are distinct occurrences. The same record repeated
-            // in overlapping Takeout files receives the same key and is merged by the database.
-            occurrenceCounter.clear();
-            int processedForFile = processed;
-            String relative = importRoot.relativize(file).toString();
-            String sourceName = sourceName(file);
+        EventStore.ImportOutcome outcome = database.mergeImport(source.toString(), insertBatch -> {
+            int processed = 0;
+            List<EventRecord> batch = new ArrayList<>(INSERT_BATCH_SIZE);
+            for (Path file : files) {
+                // Identical records in one file are distinct occurrences. The same record repeated
+                // in overlapping Takeout files receives the same key and is merged by the database.
+                occurrenceCounter.clear();
+                int processedForFile = processed;
+                String relative = takeoutRoot.relativize(file).toString();
+                String sourceName = sourceName(file);
+                progress.update(new ImportProgress(
+                        "Lendo " + relative,
+                        count[0],
+                        files.size(),
+                        processedForFile,
+                        relative,
+                        sourceName,
+                        bytesRead[0]));
+                parseFile(file, takeoutRoot, event -> {
+                    if (event == null) return;
+                    batch.add(event);
+                    count[0]++;
+                    if (batch.size() >= INSERT_BATCH_SIZE) {
+                        insertBatch.accept(batch);
+                        batch.clear();
+                        progress.update(new ImportProgress(
+                                "Indexando eventos",
+                                count[0],
+                                files.size(),
+                                processedForFile,
+                                relative,
+                                sourceName,
+                                bytesRead[0]));
+                    }
+                });
+                bytesRead[0] += safeSize(file);
+                processed++;
+                progress.update(new ImportProgress(
+                        "Processando arquivos", count[0], files.size(), processed, relative, sourceName, bytesRead[0]));
+            }
+            if (!batch.isEmpty()) insertBatch.accept(batch);
             progress.update(new ImportProgress(
-                    "Lendo " + relative, count[0], files.size(), processedForFile, relative, sourceName, bytesRead[0]));
-            parseFile(file, importRoot, event -> {
-                if (event == null) return;
-                batch.add(event);
-                count[0]++;
-                if (batch.size() >= INSERT_BATCH_SIZE) {
-                    database.insertBatch(batch);
-                    batch.clear();
-                    progress.update(new ImportProgress(
-                            "Indexando eventos",
-                            count[0],
-                            files.size(),
-                            processedForFile,
-                            relative,
-                            sourceName,
-                            bytesRead[0]));
-                }
-            });
-            bytesRead[0] += safeSize(file);
-            processed++;
-            progress.update(new ImportProgress(
-                    "Processando arquivos", count[0], files.size(), processed, relative, sourceName, bytesRead[0]));
-        }
-        if (!batch.isEmpty()) database.insertBatch(batch);
-        progress.update(new ImportProgress(
-                "Reconstruindo índice de busca", count[0], files.size(), processed, null, null, bytesRead[0]));
-        long total = database.eventCount();
-        long added = Math.max(0, total - beforeCount);
-        database.finishImport(importId, total);
+                    "Reconstruindo índice de busca", count[0], files.size(), processed, null, null, bytesRead[0]));
+        });
 
         if (tempDir != null) deleteRecursively(tempDir);
-        return new ImportResult(source.toString(), count[0], added, total);
+        return new ImportResult(source.toString(), count[0], outcome.added(), outcome.total());
     }
 
     private Path resolveInputPath(String rawPath) {
@@ -1094,11 +1093,6 @@ public class TakeoutImporter {
             String filePath,
             JsonNode raw) {
         String timestamp = normalizeDate(timestampValue);
-        ZonedDateTime local = localTime(timestamp);
-        String yearMonth = local == null ? null : local.format(LOCAL_MONTH);
-        String localDay = local == null ? null : local.format(LOCAL_DAY);
-        Integer localHour = local == null ? null : local.getHour();
-        Integer localWeekday = local == null ? null : local.getDayOfWeek().getValue() % 7;
         String domain = extractDomain(url);
         String rootDomain = Domains.registrable(domain);
         String cleanSource = clean(source, "Unknown");
@@ -1117,10 +1111,6 @@ public class TakeoutImporter {
         return new EventRecord(
                 eventKey,
                 timestamp,
-                yearMonth,
-                localDay,
-                localHour,
-                localWeekday,
                 cleanSource,
                 cleanType,
                 cleanTitle,
@@ -1130,15 +1120,6 @@ public class TakeoutImporter {
                 rootDomain,
                 filePath,
                 rawJson);
-    }
-
-    private ZonedDateTime localTime(String instant) {
-        if (instant == null) return null;
-        try {
-            return Instant.parse(instant).atZone(zone);
-        } catch (Exception ignored) {
-            return null;
-        }
     }
 
     // Natural key when the source carries a reliable id present in raw_json (so the backfill

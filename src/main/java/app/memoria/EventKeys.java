@@ -9,7 +9,7 @@ import java.util.Collections;
 import java.util.List;
 
 // Stable identity for an event, shared by fresh imports (TakeoutImporter) and the
-// migration backfill (DatabaseService) so both compute byte-identical keys.
+// migration backfill (EventStore) so both compute byte-identical keys.
 //
 // Strategy: a reliable per-occurrence natural key when the source carries one that is
 // also present in the stored raw_json (so the backfill can re-derive it); otherwise a
