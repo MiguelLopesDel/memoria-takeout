@@ -1,0 +1,12 @@
+#!/bin/sh
+# Full quality gate before pushing: everything CI runs.
+set -e
+
+echo "[pre-push] eslint + tsc + vite build"
+npm run --silent gate
+npm run --silent build
+
+echo "[pre-push] mvn verify (spotless, checkstyle, tests, cpd)"
+mvn -q -B verify
+
+echo "[pre-push] OK"

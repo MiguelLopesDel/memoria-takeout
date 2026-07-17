@@ -1,0 +1,22 @@
+node_modules
+dist
+target
+# built frontend copied into the JAR by the Docker build — never hand-edited
+src/main/resources/static/
+.memoria
+*.db
+*.db-shm
+*.db-wal
+.env
+
+# local data / personal exports — never commit
+Takeout*/
+takeout_atual/
+*.mbox
+
+# local tooling artifacts
+.playwright-mcp/
+.claude/settings.local.json
+
+# local screenshots
+*.png

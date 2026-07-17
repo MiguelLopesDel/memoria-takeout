@@ -1,0 +1,9 @@
+node_modules
+target
+dist
+.memoria
+Takeout
+Takeout_remover_depois
+*.db
+*.db-shm
+*.db-wal

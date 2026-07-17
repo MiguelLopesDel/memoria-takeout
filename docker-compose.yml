@@ -1,0 +1,12 @@
+services:
+  memoria:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      MEMORIA_DATA_DIR: /data
+      MEMORIA_DEFAULT_TAKEOUT: /imports
+      MEMORIA_IMPORT_ROOTS: /imports
+    volumes:
+      - ./.memoria:/data
+      - ${IMPORT_ROOT:-.}:/imports:ro

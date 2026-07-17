@@ -1,0 +1,38 @@
+{
+  "name": "memoria",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"mvn spring-boot:run\" \"npm:dev:web\"",
+    "dev:web": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "start": "mvn spring-boot:run",
+    "check": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 7",
+    "gate": "npm run lint && npm run check",
+    "prepare": "git config core.hooksPath .githooks || true"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.18",
+    "@radix-ui/react-popover": "^1.1.18",
+    "@radix-ui/react-tabs": "^1.1.16",
+    "@radix-ui/react-tooltip": "^1.2.11",
+    "@tanstack/react-virtual": "^3.14.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^3.9.1",
+    "vite": "^6.0.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "eslint": "^10.7.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.64.0"
+  }
+}
