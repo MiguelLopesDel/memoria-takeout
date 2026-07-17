@@ -1,5 +1,11 @@
 # One extended-regex per line (case-insensitive), matched against newly added lines
-# of every commit. Lines starting with # are comments. Add any marker that only
-# appears when personal data is leaking into the repo.
-# Brazilian CPF in canonical dotted formatting
+# of every commit. Lines starting with # are comments.
+#
+# NOTE: personal e-mail addresses are NOT listed here — a plaintext address in a
+# committed file would itself be the leak. They are matched by SHA-256 hash instead,
+# in sensitive-email-hashes.txt (the script extracts any e-mail from added lines,
+# hashes it and compares). Only add GENERIC formats here — patterns that reveal
+# nothing personal on their own.
+#
+# Brazilian CPF in canonical dotted formatting (a shape, not a specific number)
 [0-9]{3}\.[0-9]{3}\.[0-9]{3}-[0-9]{2}

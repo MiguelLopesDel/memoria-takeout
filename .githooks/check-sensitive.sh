@@ -63,6 +63,22 @@ if [ -f "$hookdir/sensitive-patterns.txt" ] && [ "$mode" = "staged" ]; then
   rm -f "$patfile"
 fi
 
+# 3b) owner e-mail addresses, matched by hash so the address never appears in the repo
+if [ -f "$hookdir/sensitive-email-hashes.txt" ] && [ "$mode" = "staged" ]; then
+  added=$(git diff --cached -U0 -- . ':(exclude).githooks/sensitive-email-hashes.txt' \
+    | grep '^+' | grep -v '^+++' || true)
+  emails=$(printf '%s\n' "$added" \
+    | grep -oE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' \
+    | tr '[:upper:]' '[:lower:]' | sort -u || true)
+  for em in $emails; do
+    h=$(printf '%s' "$em" | sha256sum | cut -d' ' -f1)
+    if grep -qi "^[[:space:]]*$h" "$hookdir/sensitive-email-hashes.txt"; then
+      echo "[sensitive] BLOCKED — a staged line contains a personal e-mail address (matched by hash)."
+      fail=1
+    fi
+  done
+fi
+
 # 4) secret scan (API keys, tokens, private keys, high-entropy strings)
 if command -v gitleaks >/dev/null 2>&1; then
   if [ "$mode" = "staged" ]; then

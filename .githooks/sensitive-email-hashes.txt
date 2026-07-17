@@ -1,0 +1,8 @@
+# SHA-256 hashes of e-mail addresses that must never appear in committed content.
+# One lowercase hex digest per line; comments start with #. The gate lowercases and
+# hashes every e-mail it finds in newly added lines and blocks on a match — so the
+# address itself is never stored here in the clear. To add one:
+#   printf '%s' "someone@example.com" | sha256sum
+# Owner's primary and legacy Gmail addresses:
+fe8a365a2f46be3ba245cbe0b310691b810c28a31418b4d5278162dd5bc54a94
+021175df82b59b57babc9afa54b7ca2262d4c4446ca7561c523040556086618a
