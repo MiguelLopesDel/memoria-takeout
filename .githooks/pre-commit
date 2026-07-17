@@ -3,6 +3,9 @@
 # Full gate (tests, duplication) runs on pre-push and in CI.
 set -e
 
+echo "[pre-commit] sensitive-data gate"
+sh "$(dirname "$0")/check-sensitive.sh" staged
+
 echo "[pre-commit] eslint + tsc"
 npm run --silent gate
 

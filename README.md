@@ -52,4 +52,10 @@ mvn -B verify       # spotless + checkstyle + testes + duplicação (roda no pre
 mvn spotless:apply  # corrige formatação Java automaticamente
 ```
 
+Todo commit passa antes por uma trava de dados sensíveis (`.githooks/check-sensitive.sh`):
+nomes proibidos (exports do Takeout, `.mbox`, `.db`, `.env`, chaves), arquivos >5 MB,
+marcadores pessoais e scan de segredos com [gitleaks](https://github.com/gitleaks/gitleaks)
+(instale o binário no PATH — a trava falha fechada sem ele). O `pre-push` re-escaneia o
+histórico inteiro. Exceção consciente: `ALLOW_SENSITIVE=1 git commit ...`.
+
 Mudanças não-triviais começam por uma RFC — veja `docs/rfcs/README.md`.

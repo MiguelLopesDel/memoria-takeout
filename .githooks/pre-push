@@ -2,6 +2,9 @@
 # Full quality gate before pushing: everything CI runs.
 set -e
 
+echo "[pre-push] sensitive-data gate (full history)"
+sh "$(dirname "$0")/check-sensitive.sh" history
+
 echo "[pre-push] eslint + tsc + vite build"
 npm run --silent gate
 npm run --silent build

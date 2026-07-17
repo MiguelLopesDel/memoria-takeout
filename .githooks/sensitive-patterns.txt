@@ -1,0 +1,5 @@
+# One extended-regex per line (case-insensitive), matched against newly added lines
+# of every commit. Lines starting with # are comments. Add any marker that only
+# appears when personal data is leaking into the repo.
+# Brazilian CPF in canonical dotted formatting
+[0-9]{3}\.[0-9]{3}\.[0-9]{3}-[0-9]{2}

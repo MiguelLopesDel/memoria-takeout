@@ -16,9 +16,23 @@ Três camadas de gate, da mais rápida para a mais completa:
 
 | Camada | Quando roda | O que roda |
 | --- | --- | --- |
-| `pre-commit` | todo commit | `npm run gate` (eslint + tsc); se há `.java` staged, `spotless:check` + `checkstyle:check` |
-| `pre-push` | todo push | tudo acima + `vite build` + `mvn -B verify` (testes + CPD) |
-| CI (`.github/workflows/ci.yml`) | PR e push em `main` | os mesmos comandos, em jobs `frontend` e `backend` |
+| `pre-commit` | todo commit | **trava de dados sensíveis** (`check-sensitive.sh staged`); `npm run gate` (eslint + tsc); se há `.java` staged, `spotless:check` + `checkstyle:check` |
+| `pre-push` | todo push | trava de dados sensíveis no **histórico inteiro** (`check-sensitive.sh history`) + tudo acima + `vite build` + `mvn -B verify` (testes + CPD) |
+| CI (`.github/workflows/ci.yml`) | PR e push em `main` | os mesmos comandos, em jobs `secrets` (gitleaks), `frontend` e `backend` |
+
+### Trava de dados sensíveis (`.githooks/check-sensitive.sh`)
+
+Este repo convive com o Takeout pessoal do dono — vazar dado pessoal é o pior bug
+possível aqui. Quatro verificações, na ordem: (1) nomes de arquivo proibidos
+(`Takeout*`, `.mbox`, `.db`, `.env`, `.pem`/`.key`/keystores, `id_rsa*`, `credentials*`);
+(2) arquivo staged >5 MB; (3) marcadores pessoais em linhas adicionadas
+(`.githooks/sensitive-patterns.txt` — e-mail do dono, CPF formatado); (4) gitleaks no
+índice staged. No `pre-push`, o gitleaks roda sobre o **histórico completo** e a
+denylist sobre todos os arquivos rastreados — é a segunda barreira que pega commits
+feitos com `--no-verify`. Falha fechada se o gitleaks não estiver instalado. Exceção
+consciente e auditável: `ALLOW_SENSITIVE=1`, nunca `--no-verify`. Gotcha de teste:
+o gitleaks tem allowlist para chaves de exemplo famosas (`AKIA...EXAMPLE`) — valide
+com token realista.
 
 Gate local e CI executam **os mesmos comandos** — CI nunca reprova algo que passou
 localmente.
