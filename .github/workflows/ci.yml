@@ -13,9 +13,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Invoked directly (same command as the pre-push hook) instead of gitleaks-action:
+      # the action derives a `first^..last` range from the push payload, which is an
+      # invalid revision when the push includes the root commit.
+      - name: Scan full history with gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks git --redact -v .
 
   frontend:
     name: Frontend (eslint, tsc, build)
