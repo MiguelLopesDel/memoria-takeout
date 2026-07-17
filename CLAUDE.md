@@ -86,5 +86,6 @@ sudo docker compose up --build     # full prod-style run on :8787 (mount Takeout
 ## Conventions
 
 - Respond to the user in Portuguese; write code comments in English.
+- **Typed contracts at seams** (docs/rfcs/0003-typed-contracts.md): data crossing the HTTP boundary or a module's public interface uses Java records (and matching TS types); `Map<String, Object>` stays legal inside JDBC implementations and for genuinely dynamic data. Enforced by `TypedContractsTest` — its allowlist only shrinks.
 - No Co-Authored-By trailers in commits.
 - Java 21 (records, switch expressions, text blocks are used throughout). Backend has no service-layer interfaces — services are concrete `@Service` classes.
